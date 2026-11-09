@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WRN Maintenance 2.0.0-rc.5 - the ONE command a technician runs on a Hanwha Gen 2 WRN (Ubuntu 22.04).
+# WRN Maintenance 2.0.0-rc.6 - the ONE command a technician runs on a Hanwha Gen 2 WRN (Ubuntu 22.04).
 # NOTICE: This is an independent field-support tool, developed through hands-on testing on Hanwha WRN
 # recorders. It is NOT an official Hanwha product and is NOT supported by Hanwha. It is provided as-is,
 # based on real-world field experience. Use it at your own discretion and judgment.
@@ -14,7 +14,7 @@
 # Every fix runs as its own sub-process so one failing step is reported, never silent.
 # No WAVE/network restart, remount, fsck, reboot, or video deletion happens here.
 # (Archive re-mount lives in wrn_recovery.sh; OS-drive video deletion lives there too.)
-WRN_SCRIPT_VERSION='2.0.0-rc.5'
+WRN_SCRIPT_VERSION='2.0.0-rc.6'
 WRN_SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 WRN_DIR=/home/wave/Downloads/maintenance
 WRN_STATE="$WRN_DIR/.wrn-visit-state"
@@ -689,7 +689,7 @@ exec >> "$REPORT" 2>&1
 finish() { rc=$?; echo "===== EXIT STATUS: $rc ====="; printf 'Report saved: %s\n' "$REPORT" >&3; exit "$rc"; }
 trap finish EXIT
 
-printf '===== WRN SYSTEMD TIMEOUT RESTORE v2.0.0-rc.5 =====\nMode: %s\nDate: %s\nHost: %s\n' "$MODE" "$(date -Is)" "$(hostname)"
+printf '===== WRN SYSTEMD TIMEOUT RESTORE v2.0.0-rc.6 =====\nMode: %s\nDate: %s\nHost: %s\n' "$MODE" "$(date -Is)" "$(hostname)"
 echo '===== BEFORE ====='
 systemctl show -p DefaultTimeoutStartUSec -p DefaultTimeoutStopUSec
 printf '\nActive settings in main config:\n'
@@ -796,6 +796,44 @@ echo 'No reboot performed. Previous dmesg.service failed state may persist until
 # <<< ORIGINAL
 }
 
+# >>> FSTAB-VERIFY (identical copy in wrn_maintenance.sh.in and wrn_recovery.sh.in; test FV7 asserts they match)
+# `findmnt --verify` exits non-zero on ANY [E] in the file, including ones that were already there and have nothing to do
+# with the archives (e.g. an old `auto` removable-media line whose device is gone). So compare against the file as it was
+# before the change and fail only on a problem the change itself would add.
+fstab_verify_errors() {  # <fstab-file>: "E<TAB>mountpoint<TAB>message" per [E] and "P<TAB>n" parse errors; rc 1 = could not verify
+  local out
+  out="$(findmnt --verify --tab-file "$1" 2>&1)" || true
+  grep -Eq '^(Success, no errors|[0-9]+ parse error)' <<< "$out" || return 1
+  awk '
+    /^[0-9]+ parse error/ { p = $1 }
+    /^[^[:space:]]/ && !/^[0-9]+ parse error/ && !/^Success/ { t = $0 }
+    /^[[:space:]]+\[E\]/ { m = $0; sub(/^[[:space:]]+\[E\][[:space:]]*/, "", m); print "E\t" t "\t" m }
+    END { print "P\t" p + 0 }
+  ' <<< "$out"
+}
+fstab_no_new_errors() {  # <candidate-fstab> <original-fstab> [quiet]: 0 = the candidate adds no [E] and no parse error
+  local cand orig new t cp op
+  cand="$(fstab_verify_errors "$1")" || { echo "STOP: could not run the fstab check on $1"; return 1; }
+  orig="$(fstab_verify_errors "$2")" || orig=''
+  new="$(comm -13 <(grep '^E' <<< "$orig" | sort -u) <(grep '^E' <<< "$cand" | sort -u))"
+  cp="$(awk -F'\t' '$1=="P"{print $2}' <<< "$cand")"; op="$(awk -F'\t' '$1=="P"{print $2}' <<< "$orig")"
+  if [[ -n "$new" ]]; then
+    echo 'The fstab check found a problem this change would add:'
+    awk -F'\t' '{print "  " $2 ": " $3}' <<< "$new"
+    return 1
+  fi
+  if (( ${cp:-0} > ${op:-0} )); then echo 'The fstab check found a new parse error that this change would add.'; return 1; fi
+  [[ "${3:-}" == quiet ]] && return 0
+  # problems that were already there are tolerated and never touched; say so once per entry
+  while IFS= read -r t; do
+    [[ -n "$t" ]] || continue
+    if [[ "$t" =~ ^/mnt/sd[a-d]$ ]]; then echo "NOTE: fstab entry $t was already flagged by findmnt before this change; it was not made worse."
+    else echo "NOTE: fstab has an unrelated entry ($t) that was not touched."; fi
+  done < <(awk -F'\t' '$1=="E"{print $2}' <<< "$cand" | sort -u)
+  return 0
+}
+# <<< FSTAB-VERIFY
+
 # --- wrn_archive_multidrive.sh: UUID + timeout normalization of every MOUNTED archive ---
 stage_multidrive() {
   local MODE="$1"   # --audit | --apply
@@ -803,7 +841,7 @@ stage_multidrive() {
 set -Eeuo pipefail
 export LC_ALL=C
 # <<< ORIGINAL
-# >>> ORIGINAL wrn_archive_multidrive.sh:8-126 sed:s/(%s) ===\\n' "\$MODE"/(%s) ===\\n' "${MODE#--}"/
+# >>> ORIGINAL wrn_archive_multidrive.sh:8-126 sed:s/(%s) ===\\n' "\$MODE"/(%s) ===\\n' "${MODE#--}"/;s#findmnt --verify --tab-file "\$draft" >/dev/null 2>&1 ||#fstab_no_new_errors "\$draft" "\$fstab" ||#;s#if ! findmnt --verify --tab-file "\$fstab" >/dev/null 2>&1; then#if ! fstab_no_new_errors "\$fstab" "\$backup" quiet; then#
 [[ ${EUID:-$(id -u)} == 0 ]] || { echo 'STOP: sudo required' >&2; exit 2; }
 . /etc/os-release
 [[ ${ID:-} == ubuntu && ${VERSION_ID:-} == 22.04 ]] || { echo 'STOP: Ubuntu 22.04 only' >&2; exit 2; }
@@ -914,10 +952,10 @@ cp -a -- "$fstab" "$backup" || exit 1
 awk -F '\t' 'NR==FNR {r[$1]=$2; next} {split($0,f,/[[:space:]]+/); if(f[1] !~ /^#/ && f[2] in r) print r[f[2]]; else print $0}' "$replacements" "$fstab" > "$draft"
 chmod --reference="$fstab" "$draft" && chown --reference="$fstab" "$draft" || exit 1
 [[ $(awk '$1 !~ /^#/ && $2 ~ /^\/mnt\/sd[a-d]$/ {n++} END{print n+0}' "$draft") -ge $expected ]] || { echo 'STOP: missing archive entries in staged fstab'; exit 1; }
-findmnt --verify --tab-file "$draft" >/dev/null 2>&1 || { echo 'STOP: staged fstab verification failed; original untouched'; exit 1; }
+fstab_no_new_errors "$draft" "$fstab" || { echo 'STOP: staged fstab verification failed; original untouched'; exit 1; }
 cmp -s "$fstab" "$backup" || { echo 'STOP: fstab changed during staging'; exit 1; }
 mv -f -- "$draft" "$fstab" || exit 1
-if ! findmnt --verify --tab-file "$fstab" >/dev/null 2>&1; then
+if ! fstab_no_new_errors "$fstab" "$backup" quiet; then
   cp -a -- "$backup" "$fstab" || echo 'CRITICAL: rollback failed'
   echo 'STOP: installed fstab verification failed; rolled back'; exit 1
 fi
@@ -1091,8 +1129,7 @@ stage_fstab_dedup() {
   echo 'Changes needed: yes'
   if [[ "$MODE" == --preview ]]; then echo 'PREVIEW ONLY. No changes made.'; exit 0; fi
   chmod --reference="$fstab" "$tmp"
-  findmnt --verify --tab-file "$tmp" > /tmp/.wrn-verify.$$ 2>&1 || { cat /tmp/.wrn-verify.$$ >&2; rm -f /tmp/.wrn-verify.$$; stop 'Candidate fstab failed validation.'; }
-  rm -f /tmp/.wrn-verify.$$
+  fstab_no_new_errors "$tmp" "$fstab" || stop 'Candidate fstab failed validation.'
   backup="/etc/fstab.wrn-dedup-$(date -u +%Y%m%dT%H%M%SZ).bak"
   [[ ! -e "$backup" ]] || stop 'Backup filename collision.'
   cp -p -- "$fstab" "$backup"
@@ -1258,6 +1295,10 @@ assess() {
         if [[ $slot == sda ]]; then say STOP "Primary archive /mnt/sda is not configured in fstab."; A_BLOCK+=("primary archive not configured in fstab"); fi ;;
     esac
   done
+  # --- fstab lines that are not archive slots but that findmnt reports as errors: reported, never touched ---
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && say NOTE "fstab has an unrelated entry ($line) that findmnt reports as a problem. It is not part of the archive setup and will not be touched."
+  done < <(fstab_verify_errors /etc/fstab 2>/dev/null | awk -F'\t' '$1=="E" && $2 !~ /^\/mnt\/sd[a-d]$/ {print $2}' | sort -u)
   say NOTE "Archive free space is not judged: WAVE keeps about 30 GB free on each archive by design."
   dups="$(dup_count)"
   if [[ "$dups" =~ ^[0-9]+$ ]] && (( dups > 0 )); then

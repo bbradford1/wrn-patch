@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WRN Recovery 2.0.0-rc.5 - EXCEPTION TOOLS for Hanwha Gen 2 WRNs (Ubuntu 22.04).
+# WRN Recovery 2.0.0-rc.6 - EXCEPTION TOOLS for Hanwha Gen 2 WRNs (Ubuntu 22.04).
 # NOTICE: This is an independent field-support tool, developed through hands-on testing on Hanwha WRN
 # recorders. It is NOT an official Hanwha product and is NOT supported by Hanwha. It is provided as-is,
 # based on real-world field experience. Use it at your own discretion and judgment.
@@ -13,7 +13,7 @@
 #
 # --recover and --os-video-delete change the recorder. They never restart WAVE, never reboot,
 # never format, and never delete anything from an archive drive.
-WRN_SCRIPT_VERSION='2.0.0-rc.5'
+WRN_SCRIPT_VERSION='2.0.0-rc.6'
 SLOTS=(sda sdb sdc sdd)
 # Archive size sanity range (bytes). Lab recorders with smaller disks can override from the
 # command line:  sudo WRN_MIN_ARCHIVE_BYTES=100000000 bash wrn_recovery.sh --recover
@@ -683,6 +683,44 @@ do_inspect() {
 # ======================= --recover (changes the recorder) =======================
 # Per-slot preflight. Prints the reason and returns 1 when a slot is not eligible.
 declare -A DEV_CLAIM
+# >>> FSTAB-VERIFY (identical copy in wrn_maintenance.sh.in and wrn_recovery.sh.in; test FV7 asserts they match)
+# `findmnt --verify` exits non-zero on ANY [E] in the file, including ones that were already there and have nothing to do
+# with the archives (e.g. an old `auto` removable-media line whose device is gone). So compare against the file as it was
+# before the change and fail only on a problem the change itself would add.
+fstab_verify_errors() {  # <fstab-file>: "E<TAB>mountpoint<TAB>message" per [E] and "P<TAB>n" parse errors; rc 1 = could not verify
+  local out
+  out="$(findmnt --verify --tab-file "$1" 2>&1)" || true
+  grep -Eq '^(Success, no errors|[0-9]+ parse error)' <<< "$out" || return 1
+  awk '
+    /^[0-9]+ parse error/ { p = $1 }
+    /^[^[:space:]]/ && !/^[0-9]+ parse error/ && !/^Success/ { t = $0 }
+    /^[[:space:]]+\[E\]/ { m = $0; sub(/^[[:space:]]+\[E\][[:space:]]*/, "", m); print "E\t" t "\t" m }
+    END { print "P\t" p + 0 }
+  ' <<< "$out"
+}
+fstab_no_new_errors() {  # <candidate-fstab> <original-fstab> [quiet]: 0 = the candidate adds no [E] and no parse error
+  local cand orig new t cp op
+  cand="$(fstab_verify_errors "$1")" || { echo "STOP: could not run the fstab check on $1"; return 1; }
+  orig="$(fstab_verify_errors "$2")" || orig=''
+  new="$(comm -13 <(grep '^E' <<< "$orig" | sort -u) <(grep '^E' <<< "$cand" | sort -u))"
+  cp="$(awk -F'\t' '$1=="P"{print $2}' <<< "$cand")"; op="$(awk -F'\t' '$1=="P"{print $2}' <<< "$orig")"
+  if [[ -n "$new" ]]; then
+    echo 'The fstab check found a problem this change would add:'
+    awk -F'\t' '{print "  " $2 ": " $3}' <<< "$new"
+    return 1
+  fi
+  if (( ${cp:-0} > ${op:-0} )); then echo 'The fstab check found a new parse error that this change would add.'; return 1; fi
+  [[ "${3:-}" == quiet ]] && return 0
+  # problems that were already there are tolerated and never touched; say so once per entry
+  while IFS= read -r t; do
+    [[ -n "$t" ]] || continue
+    if [[ "$t" =~ ^/mnt/sd[a-d]$ ]]; then echo "NOTE: fstab entry $t was already flagged by findmnt before this change; it was not made worse."
+    else echo "NOTE: fstab has an unrelated entry ($t) that was not touched."; fi
+  done < <(awk -F'\t' '$1=="E"{print $2}' <<< "$cand" | sort -u)
+  return 0
+}
+# <<< FSTAB-VERIFY
+
 fstab_slot_check() {  # read-only: exactly one eligible fstab line for this slot, drive not referenced elsewhere
   local mp="$1" u="$2" dev="$3" slot="$4" ents other src fs
   mapfile -t ents < <(awk -v mp="$mp" '$1 !~ /^#/ && NF>=4 && $2==mp {print}' /etc/fstab)
@@ -784,14 +822,11 @@ recover_slot() (
   cp -a /etc/fstab "$BACKUP"
   echo "Backup: $BACKUP"
   fstab_update_slot "$mp" "$uuid" "$dev" "$slot" || { cp -a "$BACKUP" /etc/fstab; fail 'fstab update failed; backup restored'; }
-  # findmnt --verify may return warnings from unused entries. Require no errors.
-  # A fully clean fstab (every bay populated) prints 'Success, no errors or warnings detected' INSTEAD of the
-  # '0 parse errors, 0 errors' summary, so both forms mean success. (1.0.0 matched only the first form.)
-  VERIFY="$(findmnt --verify 2>&1 || true)"
-  echo "$VERIFY"
-  if ! grep -Eq '^(0 parse errors, 0 errors|Success, no errors or warnings detected)' <<< "$VERIFY"; then
+  # Whole-file `findmnt --verify` also trips on old, unrelated fstab lines, so compare with the pre-edit copy: only a
+  # problem this edit would ADD blocks (see fstab_no_new_errors). An unrelated pre-existing error is noted and left alone.
+  if ! fstab_no_new_errors /etc/fstab "$BACKUP"; then
     cp -a "$BACKUP" /etc/fstab
-    fail 'fstab validation did not confirm zero errors; backup restored, no mount attempted'
+    fail 'fstab validation found a new problem; backup restored, no mount attempted'
   fi
   log "RELOAD MOUNT UNIT AND MOUNT ONLY $mp"
   systemctl daemon-reload
