@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WRN Maintenance 2.0.0-rc.4 - the ONE command a technician runs on a Hanwha Gen 2 WRN (Ubuntu 22.04).
+# WRN Maintenance 2.0.0-rc.5 - the ONE command a technician runs on a Hanwha Gen 2 WRN (Ubuntu 22.04).
 # NOTICE: This is an independent field-support tool, developed through hands-on testing on Hanwha WRN
 # recorders. It is NOT an official Hanwha product and is NOT supported by Hanwha. It is provided as-is,
 # based on real-world field experience. Use it at your own discretion and judgment.
@@ -14,7 +14,7 @@
 # Every fix runs as its own sub-process so one failing step is reported, never silent.
 # No WAVE/network restart, remount, fsck, reboot, or video deletion happens here.
 # (Archive re-mount lives in wrn_recovery.sh; OS-drive video deletion lives there too.)
-WRN_SCRIPT_VERSION='2.0.0-rc.4'
+WRN_SCRIPT_VERSION='2.0.0-rc.5'
 WRN_SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 WRN_DIR=/home/wave/Downloads/maintenance
 WRN_STATE="$WRN_DIR/.wrn-visit-state"
@@ -131,7 +131,7 @@ logging_kb() {
 }
 # <<< ORIGINAL
 
-# >>> ORIGINAL wrn_maintenance.sh:531-639
+# >>> ORIGINAL wrn_maintenance.sh:531-639 sed:s/STOP SNAP STAGE: protected desktop package missing: \$pkg"; return 1/SKIP SNAP STAGE: protected desktop package missing: $pkg"; return 2/
 # Snap refresh suspension is deliberately explicit: preventing an update is not the
 # same as preventing a user or another process from manually reinstalling a snap.
 # Snap refresh --hold=forever is supported on the target snapd; verify the resulting
@@ -206,7 +206,7 @@ snap_active_cleanup_pilot() {
   local pkg name remaining
   for pkg in gdm3 gnome-shell google-chrome-stable cockpit; do
     if [[ "$(dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null)" != 'install ok installed' ]]; then
-      echo "STOP SNAP STAGE: protected desktop package missing: $pkg"; return 1
+      echo "SKIP SNAP STAGE: protected desktop package missing: $pkg"; return 2
     fi
   done
   safe_state || return 1
@@ -689,7 +689,7 @@ exec >> "$REPORT" 2>&1
 finish() { rc=$?; echo "===== EXIT STATUS: $rc ====="; printf 'Report saved: %s\n' "$REPORT" >&3; exit "$rc"; }
 trap finish EXIT
 
-printf '===== WRN SYSTEMD TIMEOUT RESTORE v2.0.0-rc.4 =====\nMode: %s\nDate: %s\nHost: %s\n' "$MODE" "$(date -Is)" "$(hostname)"
+printf '===== WRN SYSTEMD TIMEOUT RESTORE v2.0.0-rc.5 =====\nMode: %s\nDate: %s\nHost: %s\n' "$MODE" "$(date -Is)" "$(hostname)"
 echo '===== BEFORE ====='
 systemctl show -p DefaultTimeoutStartUSec -p DefaultTimeoutStopUSec
 printf '\nActive settings in main config:\n'
@@ -1129,12 +1129,24 @@ acquire_lock() {
 }
 
 STAGE_SUMMARY=()
-run_stage() {  # run_stage <stage-name> "<plain label>"
-  local name="$1" label="${2:-$1}" rc
+STAGE_SKIPPED=0
+SKIP_NOTES=()
+run_stage() {  # run_stage <stage-name> "<plain label>" [skip-rc]
+  # skip-rc (optional): an exit code that means "the stage declined to act; nothing was changed". It is recorded as
+  # skipped (STAGE_SKIPPED=1) and returns 0. Any other non-zero exit is still a failure.
+  local name="$1" label="${2:-$1}" skip_rc="${3:-}" rc
+  STAGE_SKIPPED=0
   state_set STAGE_LAST "$name" STAGE_STATUS running
   printf '\n--- %s ---\n' "$label"
   WRN_STAGE_CHILD=1 bash "$WRN_SELF" --stage "$name"
   rc=$?
+  if [[ -n "$skip_rc" && "$rc" == "$skip_rc" ]]; then
+    STAGE_SKIPPED=1
+    state_set STAGE_STATUS skipped
+    STAGE_SUMMARY+=("skipped $label (nothing was changed)")
+    echo "stage skipped: $label (nothing was changed)"
+    return 0
+  fi
   if (( rc )); then
     state_set STAGE_STATUS "failed($rc)"
     STAGE_SUMMARY+=("FAILED  $label (exit $rc)")
@@ -1317,6 +1329,7 @@ finish_report() {  # finish_report <ok|fail>
   local s
   printf '\n=== RESULT ===\n'
   for s in "${STAGE_SUMMARY[@]}"; do echo "  $s"; done
+  if [[ "$1" == ok ]]; then for s in "${SKIP_NOTES[@]}"; do echo "NOTE: $s"; done; fi
   if [[ "$1" == ok && -n "${RESTART_NOTE:-}" ]]; then echo "IMPORTANT: $RESTART_NOTE"; fi
   if [[ "$1" == ok ]]; then echo 'RESULT: maintenance completed successfully.'
   else echo 'RESULT: maintenance did NOT complete. Nothing further was changed. Save this output and escalate if the cause is not clear.'; fi
@@ -1450,11 +1463,27 @@ apply_routine() {
   echo '=== GUARDED OPTIONAL SOFTWARE STAGES ==='
   APP_RESULT=skipped
   LEFT_RESULT=skipped
-  if run_stage package_apps_apply 'Remove approved unneeded applications'; then APP_RESULT='completed-or-not-needed'; else APP_RESULT='blocked'; echo 'STOP: application stage failed its guard'; return 1; fi
+  # Optional cleanup: exit 2 from the package stage means its safety guard declined (nothing was changed). That is a
+  # skip, not a failed visit; any other failure (e.g. apt itself failing) is still a hard stop.
+  if run_stage package_apps_apply 'Remove approved unneeded applications' 2; then
+    if (( STAGE_SKIPPED )); then
+      APP_RESULT='skipped'
+      SKIP_NOTES+=("Optional cleanup of unused desktop applications was skipped because this recorder's software setup is different from the usual one. Nothing was changed by that step.")
+    else APP_RESULT='completed-or-not-needed'; fi
+  else APP_RESULT='blocked'; echo 'STOP: application stage failed its guard'; return 1; fi
   safe_state || return 1
-  if run_stage package_left_apply 'Remove leftover dependencies'; then LEFT_RESULT='completed-or-not-needed'; else LEFT_RESULT='blocked'; echo 'STOP: leftovers stage failed its guard'; return 1; fi
+  if run_stage package_left_apply 'Remove leftover dependencies' 2; then
+    if (( STAGE_SKIPPED )); then
+      LEFT_RESULT='skipped'
+      SKIP_NOTES+=("Optional cleanup of leftover software files was skipped because this recorder's software setup is different from the usual one. Nothing was changed by that step.")
+    else LEFT_RESULT='completed-or-not-needed'; fi
+  else LEFT_RESULT='blocked'; echo 'STOP: leftovers stage failed its guard'; return 1; fi
   safe_state || return 1
-  run_stage snap_active_cleanup 'Remove approved active Snaps' || return 1
+  # Same rule as the two package stages: exit 2 = its protected-package check declined (nothing changed) = skip, not failure.
+  run_stage snap_active_cleanup 'Remove approved active Snaps' 2 || return 1
+  if (( STAGE_SKIPPED )); then
+    SKIP_NOTES+=("Optional cleanup of active Snap applications was skipped because this recorder's software setup is different from the usual one. Nothing was changed by that step.")
+  fi
   safe_state || return 1
   run_stage snap_orphan_apply 'Retire orphan Snap mount units' || return 1
   safe_state || return 1
