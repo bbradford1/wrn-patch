@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WRN Maintenance 2.0.0-rc.2 - the ONE command a technician runs on a Hanwha Gen 2 WRN (Ubuntu 22.04).
+# WRN Maintenance 2.0.0-rc.3 - the ONE command a technician runs on a Hanwha Gen 2 WRN (Ubuntu 22.04).
 # NOTICE: This is an independent field-support tool, developed through hands-on testing on Hanwha WRN
 # recorders. It is NOT an official Hanwha product and is NOT supported by Hanwha. It is provided as-is,
 # based on real-world field experience. Use it at your own discretion and judgment.
@@ -14,7 +14,7 @@
 # Every fix runs as its own sub-process so one failing step is reported, never silent.
 # No WAVE/network restart, remount, fsck, reboot, or video deletion happens here.
 # (Archive re-mount lives in wrn_recovery.sh; OS-drive video deletion lives there too.)
-WRN_SCRIPT_VERSION='2.0.0-rc.2'
+WRN_SCRIPT_VERSION='2.0.0-rc.3'
 WRN_SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 WRN_DIR=/home/wave/Downloads/maintenance
 WRN_STATE="$WRN_DIR/.wrn-visit-state"
@@ -689,7 +689,7 @@ exec >> "$REPORT" 2>&1
 finish() { rc=$?; echo "===== EXIT STATUS: $rc ====="; printf 'Report saved: %s\n' "$REPORT" >&3; exit "$rc"; }
 trap finish EXIT
 
-printf '===== WRN SYSTEMD TIMEOUT RESTORE v2.0.0-rc.2 =====\nMode: %s\nDate: %s\nHost: %s\n' "$MODE" "$(date -Is)" "$(hostname)"
+printf '===== WRN SYSTEMD TIMEOUT RESTORE v2.0.0-rc.3 =====\nMode: %s\nDate: %s\nHost: %s\n' "$MODE" "$(date -Is)" "$(hostname)"
 echo '===== BEFORE ====='
 systemctl show -p DefaultTimeoutStartUSec -p DefaultTimeoutStopUSec
 printf '\nActive settings in main config:\n'

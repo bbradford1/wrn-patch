@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WRN Recovery 2.0.0-rc.2 - EXCEPTION TOOLS for Hanwha Gen 2 WRNs (Ubuntu 22.04).
+# WRN Recovery 2.0.0-rc.3 - EXCEPTION TOOLS for Hanwha Gen 2 WRNs (Ubuntu 22.04).
 # NOTICE: This is an independent field-support tool, developed through hands-on testing on Hanwha WRN
 # recorders. It is NOT an official Hanwha product and is NOT supported by Hanwha. It is provided as-is,
 # based on real-world field experience. Use it at your own discretion and judgment.
@@ -13,7 +13,7 @@
 #
 # --recover and --os-video-delete change the recorder. They never restart WAVE, never reboot,
 # never format, and never delete anything from an archive drive.
-WRN_SCRIPT_VERSION='2.0.0-rc.2'
+WRN_SCRIPT_VERSION='2.0.0-rc.3'
 SLOTS=(sda sdb sdc sdd)
 # Archive size sanity range (bytes). Lab recorders with smaller disks can override from the
 # command line:  sudo WRN_MIN_ARCHIVE_BYTES=100000000 bash wrn_recovery.sh --recover
@@ -608,9 +608,13 @@ recovery_setup() {  # $1 = mode name used in the report file name
   [[ $EUID -eq 0 ]] || { echo 'Run using sudo.' >&2; exit 1; }
   local cmd
   for cmd in lsblk blkid findmnt systemctl tune2fs smartctl awk; do command -v "$cmd" >/dev/null || { echo "Missing required command: $cmd" >&2; exit 1; }; done
-  mkdir -p /home/wave/Downloads
+  # Reports go in the maintenance folder with every other report, so the end-of-visit cleanup removes them too.
+  # (v1.0.0 wrote them straight into ~/Downloads, where nothing ever cleaned them up.)
+  local rdir=/home/wave/Downloads/maintenance
+  [[ ! -L "$rdir" ]] || { echo "STOP: $rdir is a symlink; refusing to write reports there." >&2; exit 1; }
+  if [[ ! -d "$rdir" ]]; then mkdir -p "$rdir" && chown wave:wave "$rdir" 2>/dev/null || true; fi
   STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
-  REPORT="/home/wave/Downloads/WRN-Archive-Recovery_${STAMP}_$1.txt"
+  REPORT="$rdir/WRN-Archive-Recovery_${STAMP}_$1.txt"
   touch "$REPORT"; chmod 644 "$REPORT"
   exec > >(tee -a "$REPORT") 2>&1
   trap 'rc=$?; if ((rc)); then echo "Recovery utility exited with status $rc. See $REPORT"; fi' EXIT
@@ -846,7 +850,15 @@ do_recover() {
   echo 'Proceed only after customer approval and if loss of unrecovered footage is acceptable.'
   [[ -t 0 ]] || stop 'Interactive terminal required. Not running filesystem repair unattended.'
   read -r -p 'Type RECOVER to authorize ext4 journal replay and archive mounts: ' answer
-  [[ "$answer" == RECOVER ]] || stop 'User did not authorize recovery.'
+  if [[ "$answer" != RECOVER ]]; then
+    # Asked once more, in plain words: a technician used to yes/no questions may press Enter out of habit.
+    echo
+    echo 'Nothing has been changed yet.'
+    echo 'To go ahead, type the word RECOVER (all capital letters) and press Enter.'
+    echo 'Pressing Enter alone, or typing anything else, will stop here and leave the recorder as it is.'
+    read -r -p 'Type RECOVER to authorize, or anything else to stop: ' answer
+  fi
+  [[ "$answer" == RECOVER ]] || stop 'User did not authorize recovery. Nothing was changed.'
   for slot in "${targets[@]}"; do
     log "RECOVERING /mnt/$slot"
     if recover_slot "$slot"; then ok+=("$slot"); else bad+=("$slot"); fi

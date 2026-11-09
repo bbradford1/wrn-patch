@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WRN Diagnose 2.0.0-rc.2 - READ-ONLY diagnostics for Hanwha WRN recorders.
+# WRN Diagnose 2.0.0-rc.3 - READ-ONLY diagnostics for Hanwha WRN recorders.
 # NOTICE: This is an independent field-support tool, developed through hands-on testing on Hanwha WRN
 # recorders. It is NOT an official Hanwha product and is NOT supported by Hanwha. It is provided as-is,
 # based on real-world field experience. Use it at your own discretion and judgment.
@@ -15,7 +15,7 @@
 #
 # NOTE ON ARCHIVE FREE SPACE: WAVE deliberately keeps about 30 GB free on every archive
 # drive. Low free space on an archive drive is NORMAL and is never reported as a problem.
-WRN_SCRIPT_VERSION='2.0.0-rc.2'
+WRN_SCRIPT_VERSION='2.0.0-rc.3'
 
 usage() {
   printf 'WRN Diagnose %s (read-only)\n' "$WRN_SCRIPT_VERSION"
@@ -159,7 +159,7 @@ archive_status_summary() {
 }
 
 section 'REPORT INFORMATION'
-printf 'UTC: %s\nHostname: %s\nCollector: WRN Diagnose 2.0.0-rc.2\nOperator: %s\nMode: READ-ONLY\nArchive selected: %s\nSelection method: %s\nArchive mounted at /mnt/sda: %s\n' "$(date -u -Is)" "$HOST" "$OPERATOR" "${ARCHIVE_DEV:-UNRESOLVED}" "${ARCHIVE_MATCH:-not determined}" "$ARCHIVE_MOUNTED" >> "$REPORT"
+printf 'UTC: %s\nHostname: %s\nCollector: WRN Diagnose 2.0.0-rc.3\nOperator: %s\nMode: READ-ONLY\nArchive selected: %s\nSelection method: %s\nArchive mounted at /mnt/sda: %s\n' "$(date -u -Is)" "$HOST" "$OPERATOR" "${ARCHIVE_DEV:-UNRESOLVED}" "${ARCHIVE_MATCH:-not determined}" "$ARCHIVE_MOUNTED" >> "$REPORT"
 run 'OS, KERNEL, TIME, UPTIME' 5 bash -c 'grep -E "^(PRETTY_NAME|VERSION_ID)=" /etc/os-release; printf "Kernel: "; uname -r; printf "Local time: "; date -Is; printf "Boot: "; uptime -s; uptime -p'
 run 'OS DISK CAPACITY' 5 df -hT /
 run 'OS JOURNAL UTILIZATION (READ-ONLY)' 8 bash -c 'journalctl --disk-usage 2>&1; for p in /var/log/journal /run/log/journal; do if [[ -d "$p" ]]; then du -sh "$p" 2>&1; else echo "$p: not present"; fi; done'
@@ -346,7 +346,7 @@ if [[ "$OPERATOR" != root ]]; then
 fi
 chmod 644 "$REPORT"
 chown wave:wave "$REPORT" 2>/dev/null || true
-printf '\n========== WRN DIAGNOSE 2.0.0-rc.2 | DIAGNOSTICS ========\n'
+printf '\n========== WRN DIAGNOSE 2.0.0-rc.3 | DIAGNOSTICS ========\n'
 printf 'Host: %s\nReport: %s\n' "$HOST" "$REPORT"
 printf 'OS: '; df -h / | awk 'NR==2 {print $5 " used; " $4 " free"}'
 archive_status_summary
@@ -493,7 +493,7 @@ run() {
   else "$@" 2>&1 || printf '[NOTE] Command exited nonzero: %s\n' "$1"; fi
 }
 
-section 'WRN READ-ONLY INSPECTION 2.0.0-rc.2'
+section 'WRN READ-ONLY INSPECTION 2.0.0-rc.3'
 printf 'UTC: %s\nHost: %s\nReport: %s\n' "$STAMP" "$HOST" "$REPORT"
 printf 'No maintenance, package changes, mounting, service restarts, or reboot.\n'
 section 'OPERATING SYSTEM'
