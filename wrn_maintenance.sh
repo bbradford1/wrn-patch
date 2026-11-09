@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WRN Maintenance 2.0.0-rc.3 - the ONE command a technician runs on a Hanwha Gen 2 WRN (Ubuntu 22.04).
+# WRN Maintenance 2.0.0-rc.4 - the ONE command a technician runs on a Hanwha Gen 2 WRN (Ubuntu 22.04).
 # NOTICE: This is an independent field-support tool, developed through hands-on testing on Hanwha WRN
 # recorders. It is NOT an official Hanwha product and is NOT supported by Hanwha. It is provided as-is,
 # based on real-world field experience. Use it at your own discretion and judgment.
@@ -14,7 +14,7 @@
 # Every fix runs as its own sub-process so one failing step is reported, never silent.
 # No WAVE/network restart, remount, fsck, reboot, or video deletion happens here.
 # (Archive re-mount lives in wrn_recovery.sh; OS-drive video deletion lives there too.)
-WRN_SCRIPT_VERSION='2.0.0-rc.3'
+WRN_SCRIPT_VERSION='2.0.0-rc.4'
 WRN_SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 WRN_DIR=/home/wave/Downloads/maintenance
 WRN_STATE="$WRN_DIR/.wrn-visit-state"
@@ -689,7 +689,7 @@ exec >> "$REPORT" 2>&1
 finish() { rc=$?; echo "===== EXIT STATUS: $rc ====="; printf 'Report saved: %s\n' "$REPORT" >&3; exit "$rc"; }
 trap finish EXIT
 
-printf '===== WRN SYSTEMD TIMEOUT RESTORE v2.0.0-rc.3 =====\nMode: %s\nDate: %s\nHost: %s\n' "$MODE" "$(date -Is)" "$(hostname)"
+printf '===== WRN SYSTEMD TIMEOUT RESTORE v2.0.0-rc.4 =====\nMode: %s\nDate: %s\nHost: %s\n' "$MODE" "$(date -Is)" "$(hostname)"
 echo '===== BEFORE ====='
 systemctl show -p DefaultTimeoutStartUSec -p DefaultTimeoutStopUSec
 printf '\nActive settings in main config:\n'
@@ -1047,13 +1047,18 @@ stage_fstab_dedup() {
     echo "/mnt/$slot: $n fstab entries"
   done
   if (( ${#dups[@]} == 0 )); then echo 'No duplicate archive entries; nothing to do.'; exit 0; fi
-  local source target fs opts dump check src parts uuid mu pk new_entry fstype
+  local source target fs opts nopts dump check src parts uuid mu pk new_entry fstype
   for slot in "${dups[@]}"; do
     mp="/mnt/$slot"
     read -r source target fs opts dump check <<< "${ENT[$slot:0]}"
-    [[ "$fs" == ext4 ]] || stop "$mp filesystem is $fs, expected ext4."
-    case "$opts" in
-      "$FACTORY"|'defaults,nofail,x-systemd.device-timeout=60s'|'defaults,nofail,x-systemd.device-timeout=60s,x-systemd.mount-timeout=120s') ;;
+    # Found on a real unit (PROGRESS item 16): some factory images write the fstab type as "auto" and the device
+    # timeout as a bare number ("=60"); both are valid fstab. The mounted-drive checks below still require the live
+    # mount itself to be ext4, so "auto" is only ever accepted for a drive that is really ext4 (or an empty bay).
+    [[ "$fs" == ext4 || "$fs" == auto ]] || stop "$mp filesystem is $fs, expected ext4 or auto."
+    # "60" and "60s" mean the same to systemd: compare the options with an optional "s" after the numbers removed.
+    nopts="$(sed -E 's/(x-systemd\.(device|mount)-timeout=[0-9]+)s/\1/g' <<< "$opts")"
+    case "$nopts" in
+      "$FACTORY"|'defaults,nofail,x-systemd.device-timeout=60'|'defaults,nofail,x-systemd.device-timeout=60,x-systemd.mount-timeout=120') ;;
       *) stop "Unrecognized $mp options; manual review needed." ;;
     esac
     [[ "$dump" == 0 && ( "$check" == 0 || "$check" == 2 ) ]] || stop "Unexpected dump/fsck fields for $mp."
