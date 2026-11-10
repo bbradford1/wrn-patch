@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WRN Legacy Maintenance 2.0.0-rc.7 - the ONE command a technician runs on a Hanwha Gen 1 WRN (Ubuntu 18.04).
+# WRN Legacy Maintenance 2.0.0-rc.8 - the ONE command a technician runs on a Hanwha Gen 1 WRN (Ubuntu 18.04).
 # NOTICE: This is an independent field-support tool, developed through hands-on testing on Hanwha WRN
 # recorders. It is NOT an official Hanwha product and is NOT supported by Hanwha. It is provided as-is,
 # based on real-world field experience. Use it at your own discretion and judgment.
@@ -20,7 +20,7 @@
 set -u
 export LC_ALL=C
 umask 077
-VERSION='2.0.0-rc.7'
+VERSION='2.0.0-rc.8'
 WRN_SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 
 usage() {
@@ -48,7 +48,7 @@ esac
 [[ -r /etc/os-release ]] || { echo 'STOP: cannot read OS information' >&2; exit 2; }
 # shellcheck disable=SC1091
 . /etc/os-release
-VERSION='2.0.0-rc.7'   # os-release also defines VERSION (the OS release text); keep this tool's own version
+VERSION='2.0.0-rc.8'   # os-release also defines VERSION (the OS release text); keep this tool's own version
 [[ "${ID:-}" == ubuntu && "${VERSION_ID:-}" == 18.04 ]] || { echo "$GEN2_STOP" >&2; exit 2; }
 if [[ $EUID -ne 0 ]]; then
   # A technician who forgot sudo should not have to retype anything.

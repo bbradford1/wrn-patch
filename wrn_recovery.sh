@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WRN Recovery 2.0.0-rc.7 - EXCEPTION TOOLS for Hanwha Gen 2 WRNs (Ubuntu 22.04).
+# WRN Recovery 2.0.0-rc.8 - EXCEPTION TOOLS for Hanwha Gen 2 WRNs (Ubuntu 22.04).
 # NOTICE: This is an independent field-support tool, developed through hands-on testing on Hanwha WRN
 # recorders. It is NOT an official Hanwha product and is NOT supported by Hanwha. It is provided as-is,
 # based on real-world field experience. Use it at your own discretion and judgment.
@@ -13,7 +13,7 @@
 #
 # --recover and --os-video-delete change the recorder. They never restart WAVE, never reboot,
 # never format, and never delete anything from an archive drive.
-WRN_SCRIPT_VERSION='2.0.0-rc.7'
+WRN_SCRIPT_VERSION='2.0.0-rc.8'
 SLOTS=(sda sdb sdc sdd)
 # Archive size sanity range (bytes). Lab recorders with smaller disks can override from the
 # command line:  sudo WRN_MIN_ARCHIVE_BYTES=100000000 bash wrn_recovery.sh --recover

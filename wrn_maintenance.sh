@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WRN Maintenance 2.0.0-rc.7 - the ONE command a technician runs on a Hanwha Gen 2 WRN (Ubuntu 22.04).
+# WRN Maintenance 2.0.0-rc.8 - the ONE command a technician runs on a Hanwha Gen 2 WRN (Ubuntu 22.04).
 # NOTICE: This is an independent field-support tool, developed through hands-on testing on Hanwha WRN
 # recorders. It is NOT an official Hanwha product and is NOT supported by Hanwha. It is provided as-is,
 # based on real-world field experience. Use it at your own discretion and judgment.
@@ -14,7 +14,7 @@
 # Every fix runs as its own sub-process so one failing step is reported, never silent.
 # No WAVE/network restart, remount, fsck, reboot, or video deletion happens here.
 # (Archive re-mount lives in wrn_recovery.sh; OS-drive video deletion lives there too.)
-WRN_SCRIPT_VERSION='2.0.0-rc.7'
+WRN_SCRIPT_VERSION='2.0.0-rc.8'
 WRN_SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 WRN_DIR=/home/wave/Downloads/maintenance
 WRN_STATE="$WRN_DIR/.wrn-visit-state"
@@ -689,7 +689,7 @@ exec >> "$REPORT" 2>&1
 finish() { rc=$?; echo "===== EXIT STATUS: $rc ====="; printf 'Report saved: %s\n' "$REPORT" >&3; exit "$rc"; }
 trap finish EXIT
 
-printf '===== WRN SYSTEMD TIMEOUT RESTORE v2.0.0-rc.7 =====\nMode: %s\nDate: %s\nHost: %s\n' "$MODE" "$(date -Is)" "$(hostname)"
+printf '===== WRN SYSTEMD TIMEOUT RESTORE v2.0.0-rc.8 =====\nMode: %s\nDate: %s\nHost: %s\n' "$MODE" "$(date -Is)" "$(hostname)"
 echo '===== BEFORE ====='
 systemctl show -p DefaultTimeoutStartUSec -p DefaultTimeoutStopUSec
 printf '\nActive settings in main config:\n'
@@ -1143,6 +1143,51 @@ stage_fstab_dedup() {
   echo 'Updated /etc/fstab. No archive was mounted or unmounted by this step.'
 }
 
+# --- crash dump (core file) cleanup in /home/wave (NEW in 2.0.0-rc.8; PROGRESS item 27) ---
+# A program that crashes leaves a full-memory "core" file in its working folder, with no rotation and no size limit. On a
+# real unit the WAVE client left about 7.7 GB of them in /home/wave and filled the OS drive. They are records of programs that
+# already stopped, not live data, so removing them is safe once they are reported. Only REAL dumps are ever touched:
+#  * regular files (never symlinks, never directories), at most 2 levels below /home/wave, named core or core.*
+#  * whose ELF header says "core file" (so a notes file called "core", or an executable called core.exe, is left alone)
+#  * not modified in the last 10 minutes (a dump might still be being written)
+# Sizes are what is ALLOCATED on disk (a sparse dump can claim gigabytes and use almost nothing).
+stage_cores() {
+  local MODE="$1"   # audit | apply
+  set -Eeuo pipefail
+  local home=/home/wave f hdr t n=0 left=0 bytes=0 blocks bsize mt oldest=0 newest=0 now
+  local -a found=()
+  now="$(date +%s)"
+  echo "=== CRASH DUMP (CORE) FILES in $home ($MODE) ==="
+  [[ -d "$home" && ! -L "$home" ]] || { echo "SKIP: $home not found"; return 0; }
+  is_core_dump() {   # ELF magic + e_type 4 (ET_CORE), either byte order
+    local h; h="$(head -c 18 -- "$1" 2>/dev/null | od -An -tx1 | tr -d ' \n')"
+    [[ "${h:0:8}" == 7f454c46 && ( "${h:32:4}" == 0400 || "${h:32:4}" == 0004 ) ]]
+  }
+  while IFS= read -r -d '' f; do
+    [[ -f "$f" && ! -L "$f" ]] || continue
+    mt="$(stat -c %Y -- "$f")"
+    if ! is_core_dump "$f" || (( now - mt < 600 )); then left=$((left+1)); continue; fi
+    read -r blocks bsize <<< "$(stat -c '%b %B' -- "$f")"
+    bytes=$((bytes + blocks * bsize)); n=$((n+1)); found+=("$f")
+    (( oldest == 0 || mt < oldest )) && oldest="$mt"
+    (( mt > newest )) && newest="$mt"
+  done < <(find "$home" -maxdepth 2 -type f \( -name core -o -name 'core.*' \) -print0 2>/dev/null)
+  if (( n == 0 )); then echo "CORE DUMPS: 0 removable; $left left alone"; return 0; fi
+  echo "CORE DUMPS: $n removable; $(human_bytes "$bytes") on disk; oldest $(date -d "@$oldest" '+%Y-%m-%d %H:%M'); newest $(date -d "@$newest" '+%Y-%m-%d %H:%M'); $( (( left )) && echo "$left left alone (not a crash dump, or written in the last 10 minutes)" || echo 'nothing else matched')"
+  [[ "$MODE" == apply ]] || { echo 'AUDIT ONLY: nothing removed'; return 0; }
+  local removed=0 freed=0
+  for f in "${found[@]}"; do
+    # re-check right before deleting: still a regular file, not a symlink, still a core dump
+    [[ -f "$f" && ! -L "$f" ]] && is_core_dump "$f" || { echo "STOP: $f changed since it was inspected; not removed"; return 1; }
+    read -r blocks bsize <<< "$(stat -c '%b %B' -- "$f")"
+    rm -f -- "$f" || { echo "STOP: could not remove $f"; return 1; }
+    [[ ! -e "$f" ]] || { echo "STOP: $f is still there after removal"; return 1; }
+    removed=$((removed+1)); freed=$((freed + blocks * bsize))
+    echo "REMOVED: $f ($(human_bytes $((blocks * bsize))))"
+  done
+  echo "PASS: removed $removed crash dump file(s), freed about $(human_bytes "$freed")"
+}
+
 # ==================================================================================================
 # NEW IN 2.0.0: visit state, stage runner, findings, the one-question flow
 # ==================================================================================================
@@ -1220,6 +1265,8 @@ run_child_stage() {
     snap_active_cleanup) snap_active_cleanup_pilot ;;
     snap_orphan_audit) snap_orphan_cleanup audit ;;
     snap_orphan_apply) snap_orphan_cleanup apply ;;
+    core_audit)        stage_cores audit ;;
+    core_apply)        stage_cores apply ;;
     dmesg_audit)       dmesg_service_recovery audit ;;
     dmesg_apply)       dmesg_service_recovery apply ;;
     final_kb_summary)  final_kb_summary ;;
@@ -1267,11 +1314,11 @@ dup_count() { awk '$1 !~ /^#/ && $2 ~ /^\/mnt\/sd[a-d]$/ {m[$2]++} END{n=0; for(
 
 human_bytes() { numfmt --to=iec --suffix=B "$1" 2>/dev/null || echo "$1 bytes"; }
 say() { printf '  [%-5s] %s\n' "$1" "$2"; }
-A_BLOCK=(); A_OFFLINE=(); A_NEED_TIMEOUT=0; A_NEED_DEDUP=0; A_ROUTINE_OK=1; A_OS_DIRS=0; A_OS_BYTES=0
+A_BLOCK=(); A_OFFLINE=(); A_NEED_TIMEOUT=0; A_NEED_DEDUP=0; A_NEED_CORES=0; A_ROUTINE_OK=1; A_OS_DIRS=0; A_OS_BYTES=0
 
 assess() {
   local slot start stop usage tmp line nmounted=0 dups
-  A_BLOCK=(); A_OFFLINE=(); A_NEED_TIMEOUT=0; A_NEED_DEDUP=0; A_ROUTINE_OK=1
+  A_BLOCK=(); A_OFFLINE=(); A_NEED_TIMEOUT=0; A_NEED_DEDUP=0; A_NEED_CORES=0; A_ROUTINE_OK=1
   printf '\n=== WHAT I FOUND (read-only) ===\n'
   printf 'Recorder: %s   OS drive: %s\n' "$(hostname -s)" "$(df -h / | awk 'NR==2{print $5 " used, " $4 " free"}')"
   # --- systemd timeouts (do this first: a 3-second timeout can make drives drop offline) ---
@@ -1334,6 +1381,16 @@ assess() {
       say NOTE "WAVE's analytics data is being stored on the OS drive instead of the archive drive - this slowly fills the OS drive over time."
       say NOTE "Switch this in WAVE's Drive settings to point to the archive drive. This tool does not change it."
     fi
+  fi
+  # --- crash dumps (core files) in /home/wave: reported here, removed by the routine (they only record programs that already stopped) ---
+  stage_quiet core_audit "$tmp" || true
+  line="$(grep -m1 '^CORE DUMPS:' "$tmp" || true)"
+  if [[ "$line" =~ ^CORE\ DUMPS:\ ([0-9]+)\ removable ]] && (( BASH_REMATCH[1] > 0 )); then
+    say FIX "${BASH_REMATCH[1]} crash dump file(s) in /home/wave: ${line#CORE DUMPS: ${BASH_REMATCH[1]} removable; }. Will remove them; they only record programs that had already stopped."
+    say NOTE "Crash dumps mean a program crashed (often the WAVE client). Tell engineering/support if this keeps happening."
+    A_NEED_CORES=1
+  else
+    say OK "No crash dump (core) files in /home/wave."
   fi
   if (( ${#A_OFFLINE[@]} == 0 && ${#A_BLOCK[@]} == 0 )) && [[ "${M_STATE[sda]}" == mounted ]]; then
     stage_quiet snap_orphan_audit "$tmp" || true
@@ -1415,6 +1472,7 @@ guided() {
   local plan=()
   (( A_NEED_TIMEOUT )) && plan+=("restore the normal 90-second system time-out")
   (( A_NEED_DEDUP )) && plan+=("remove duplicate archive lines from /etc/fstab (backup first)")
+  (( A_NEED_CORES )) && plan+=("remove crash dump (core) files from /home/wave")
   if (( ${#A_OFFLINE[@]} )); then
     plan+=("ask you about re-mounting the offline archive drive(s): ${A_OFFLINE[*]}, then carry on with routine maintenance")
   elif (( !A_ROUTINE_OK )); then
@@ -1533,6 +1591,10 @@ apply_routine() {
   safe_state || return 1
   run_stage snap_orphan_apply 'Retire orphan Snap mount units' || return 1
   safe_state || return 1
+  if (( A_NEED_CORES )); then
+    run_stage core_apply 'Remove crash dump (core) files from /home/wave' || return 1
+    safe_state || return 1
+  fi
   # dmesg retry is best-effort (as in 1.0.0): it reports a WARNING instead of failing the visit.
   # It runs AFTER the time-out fix, which it requires (it refuses to retry while timeouts are 3s).
   run_stage dmesg_apply 'Retry the dmesg service' || true
