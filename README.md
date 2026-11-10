@@ -10,7 +10,7 @@ wget -qO- https://raw.githubusercontent.com/bbradford1/wrn-patch/main/installer.
 
 The tool downloads itself, checks its own files, and offers to start. From here it asks you plain **yes / no** questions (or **1 / 2**). Read each one, answer, and press **Enter**. If it asks for a password, type the recorder's password (nothing shows on screen while you type; that is normal).
 
-Sometimes it asks you to type a word that appears on the screen. That is a safety check before it does something it cannot undo. Type exactly what it shows. If you press **Enter** by mistake it asks once more, and nothing changes until you type the word.
+Sometimes it asks you to type a word shown in quotes on the screen, such as "recover" or "delete". That is a safety check before it does something it cannot undo. Capital or small letters both work. If you press **Enter** by mistake or mistype it, nothing changes: it says so and offers to try again (up to 3 tries in all), and you can press **Enter** to cancel.
 
 If an earlier visit finished but was never signed off, it asks whether to finish that one or start a new visit.
 

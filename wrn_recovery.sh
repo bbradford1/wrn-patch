@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# WRN Recovery 2.0.0-rc.8 - EXCEPTION TOOLS for Hanwha Gen 2 WRNs (Ubuntu 22.04).
+# WRN Recovery 2.0.0-rc.9 - EXCEPTION TOOLS for Hanwha Gen 2 WRNs (Ubuntu 22.04).
 # NOTICE: This is an independent field-support tool, developed through hands-on testing on Hanwha WRN
 # recorders. It is NOT an official Hanwha product and is NOT supported by Hanwha. It is provided as-is,
 # based on real-world field experience. Use it at your own discretion and judgment.
 # Not part of routine maintenance. wrn_maintenance.sh never runs anything here except --inspect.
 #
 #   sudo bash wrn_recovery.sh --inspect          read-only look at EVERY archive drive (default)
-#   sudo bash wrn_recovery.sh --recover          re-mount every offline archive drive (type RECOVER)
+#   sudo bash wrn_recovery.sh --recover          re-mount every offline archive drive (type "recover")
 #   sudo bash wrn_recovery.sh --recover --only sdb   limit --recover to one drive
 #   sudo bash wrn_recovery.sh --os-video-scan    list WAVE video that landed on the OS drive (read-only)
-#   sudo bash wrn_recovery.sh --os-video-delete  delete that video (type DELETE OS VIDEO)
+#   sudo bash wrn_recovery.sh --os-video-delete  delete that video (type "delete")
 #
 # --recover and --os-video-delete change the recorder. They never restart WAVE, never reboot,
 # never format, and never delete anything from an archive drive.
-WRN_SCRIPT_VERSION='2.0.0-rc.8'
+WRN_SCRIPT_VERSION='2.0.0-rc.9'
 SLOTS=(sda sdb sdc sdd)
 # Archive size sanity range (bytes). Lab recorders with smaller disks can override from the
 # command line:  sudo WRN_MIN_ARCHIVE_BYTES=100000000 bash wrn_recovery.sh --recover
@@ -24,9 +24,9 @@ usage() {
   printf 'WRN Recovery %s\n' "$WRN_SCRIPT_VERSION"
   printf 'Usage: sudo bash wrn_recovery.sh [--inspect | --recover [--only sdX] | --os-video-scan | --os-video-delete [--low-only|--high-only] | --version | --help]\n'
   printf '  --inspect          Read-only report on every archive drive (default). Changes nothing.\n'
-  printf '  --recover          Replay the ext4 journal and re-mount each OFFLINE archive drive. Asks you to type RECOVER.\n'
+  printf '  --recover          Replay the ext4 journal and re-mount each OFFLINE archive drive. Asks you to type the word "recover".\n'
   printf '  --os-video-scan    Read-only: list WAVE video recorded onto the OS drive.\n'
-  printf '  --os-video-delete  Delete that OS-drive video (irreversible). Asks you to type DELETE OS VIDEO.\n'
+  printf '  --os-video-delete  Delete that OS-drive video (irreversible). Asks you to type the word "delete".\n'
   printf 'Archive drives normally keep ~30 GB free (WAVE reserve); that is not a fault.\n'
 }
 
@@ -71,7 +71,7 @@ usage() {
 WAVE OS Archive Cleanup (wrn_recovery.sh --os-video-scan / --os-video-delete)
 
   --os-video-scan                 List dated WAVE recording directories on the OS drive. Deletes nothing.
-  --os-video-delete               Delete them after you type DELETE OS VIDEO.
+  --os-video-delete               Delete them after you type the word "delete".
     --low-only / --high-only      Limit to low_quality or hi_quality recordings.
 EOT
 }
@@ -226,12 +226,12 @@ if $DO_DELETE; then
         fi
     done
 # <<< ORIGINAL
-# >>> ORIGINAL wrn_os_archive_cleanup.sh:275-598 sed:s/\$0 --delete/$0 --os-video-delete/g
+# >>> ORIGINAL wrn_os_archive_cleanup.sh:275-276
     printf '%s\n' 'CAUTION: Deleting OS recording data is irreversible.' \
       'Verify WAVE is now recording to an archive drive, playback works, and customer approves footage loss.' > /dev/tty
-    printf 'Type DELETE OS VIDEO to proceed: ' > /dev/tty
-    IFS= read -r confirmation < /dev/tty || exit 1
-    [[ "$confirmation" == 'DELETE OS VIDEO' ]] || { echo 'DECLINED: nothing deleted'; exit 1; }
+# <<< ORIGINAL
+    ask_typed_word delete deleted tty || exit 1
+# >>> ORIGINAL wrn_os_archive_cleanup.sh:280-598 sed:s/\$0 --delete/$0 --os-video-delete/g
 fi
 
 # ============================================================
@@ -622,6 +622,27 @@ recovery_setup() {  # $1 = mode name used in the report file name
 log(){ printf '\n=== %s ===\n' "$*"; }
 stop(){ echo "STOP: $*"; echo "Report: $REPORT"; exit 1; }
 
+# Typed-word confirmation, shared by --recover and --os-video-delete. The word is shown in quotes; capital or small letters
+# and spaces around it do not matter. A blank or wrong answer changes nothing and offers a retry; 3 attempts in total.
+# Returns 0 = the word was typed, 1 = cancelled or out of attempts, 2 = input closed.  $1 word  $2 changed|deleted  $3 tty = use /dev/tty
+ask_say()  { if [[ "$1" == tty ]]; then printf '%s' "$2" > /dev/tty; else printf '%s' "$2"; fi; }
+ask_read() { if [[ "$1" == tty ]]; then IFS= read -r "$2" < /dev/tty; else IFS= read -r "$2"; fi; }
+ask_typed_word() {
+  local word="$1" what="$2" io="${3:-}" n a k
+  for (( n = 1; n <= 3; n++ )); do
+    ask_say "$io" "Type the word \"$word\" to confirm, then press Enter: "
+    ask_read "$io" a || { echo; echo "STOP: confirmation input unavailable. Nothing was $what."; return 2; }
+    a="${a#"${a%%[![:space:]]*}"}"; a="${a%"${a##*[![:space:]]}"}"
+    [[ "${a,,}" == "$word" ]] && return 0
+    if (( n == 3 )); then echo; echo "Stopping for safety. Nothing was $what. Run the tool again when you're ready."; return 1; fi
+    ask_say "$io" $'\nThat didn\'t match. Nothing has been '"$what"$'.\n'
+    ask_say "$io" 'Would you like to try again? Type "yes" to try again, or press Enter to cancel: '
+    ask_read "$io" k || { echo; echo "STOP: confirmation input unavailable. Nothing was $what."; return 2; }
+    k="${k#"${k%%[![:space:]]*}"}"; k="${k%"${k##*[![:space:]]}"}"
+    case "${k,,}" in ''|n|no|cancel) echo; echo "Cancelled. Nothing was $what. Run the tool again when you're ready."; return 1 ;; esac
+  done
+}
+
 # ======================= --inspect (read-only) =======================
 do_inspect() {
   local slot dev mp unit offline=0 notfound=0
@@ -671,7 +692,7 @@ do_inspect() {
   log 'WHAT TO DO NEXT'
     if (( offline )); then
       echo "$offline archive drive(s) are present but OFFLINE. To journal-replay and re-mount them:"
-      echo '  sudo bash wrn_recovery.sh --recover        (you will be asked to type RECOVER)'
+      echo '  sudo bash wrn_recovery.sh --recover        (you will be asked to type the word "recover")'
       echo 'Get customer approval first: journal replay writes to the drive.'
     fi
     if (( notfound )); then echo "$notfound configured archive drive(s) were not found at all: hardware/cabling check, not a software recovery."; fi
@@ -884,16 +905,7 @@ do_recover() {
   echo 'It can change incomplete recording transactions. This is NOT a backup, and not a full fsck repair.'
   echo 'Proceed only after customer approval and if loss of unrecovered footage is acceptable.'
   [[ -t 0 ]] || stop 'Interactive terminal required. Not running filesystem repair unattended.'
-  read -r -p 'Type RECOVER to authorize ext4 journal replay and archive mounts: ' answer
-  if [[ "$answer" != RECOVER ]]; then
-    # Asked once more, in plain words: a technician used to yes/no questions may press Enter out of habit.
-    echo
-    echo 'Nothing has been changed yet.'
-    echo 'To go ahead, type the word RECOVER (all capital letters) and press Enter.'
-    echo 'Pressing Enter alone, or typing anything else, will stop here and leave the recorder as it is.'
-    read -r -p 'Type RECOVER to authorize, or anything else to stop: ' answer
-  fi
-  [[ "$answer" == RECOVER ]] || stop 'User did not authorize recovery. Nothing was changed.'
+  ask_typed_word recover changed || { echo "Report: $REPORT"; exit 1; }
   for slot in "${targets[@]}"; do
     log "RECOVERING /mnt/$slot"
     if recover_slot "$slot"; then ok+=("$slot"); else bad+=("$slot"); fi
