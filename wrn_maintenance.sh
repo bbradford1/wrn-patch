@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WRN Maintenance 2.0.0-rc.6 - the ONE command a technician runs on a Hanwha Gen 2 WRN (Ubuntu 22.04).
+# WRN Maintenance 2.0.0-rc.7 - the ONE command a technician runs on a Hanwha Gen 2 WRN (Ubuntu 22.04).
 # NOTICE: This is an independent field-support tool, developed through hands-on testing on Hanwha WRN
 # recorders. It is NOT an official Hanwha product and is NOT supported by Hanwha. It is provided as-is,
 # based on real-world field experience. Use it at your own discretion and judgment.
@@ -14,7 +14,7 @@
 # Every fix runs as its own sub-process so one failing step is reported, never silent.
 # No WAVE/network restart, remount, fsck, reboot, or video deletion happens here.
 # (Archive re-mount lives in wrn_recovery.sh; OS-drive video deletion lives there too.)
-WRN_SCRIPT_VERSION='2.0.0-rc.6'
+WRN_SCRIPT_VERSION='2.0.0-rc.7'
 WRN_SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 WRN_DIR=/home/wave/Downloads/maintenance
 WRN_STATE="$WRN_DIR/.wrn-visit-state"
@@ -689,7 +689,7 @@ exec >> "$REPORT" 2>&1
 finish() { rc=$?; echo "===== EXIT STATUS: $rc ====="; printf 'Report saved: %s\n' "$REPORT" >&3; exit "$rc"; }
 trap finish EXIT
 
-printf '===== WRN SYSTEMD TIMEOUT RESTORE v2.0.0-rc.6 =====\nMode: %s\nDate: %s\nHost: %s\n' "$MODE" "$(date -Is)" "$(hostname)"
+printf '===== WRN SYSTEMD TIMEOUT RESTORE v2.0.0-rc.7 =====\nMode: %s\nDate: %s\nHost: %s\n' "$MODE" "$(date -Is)" "$(hostname)"
 echo '===== BEFORE ====='
 systemctl show -p DefaultTimeoutStartUSec -p DefaultTimeoutStopUSec
 printf '\nActive settings in main config:\n'
@@ -1077,9 +1077,13 @@ stage_fstab_dedup() {
   dups=()
   for slot in sda sdb sdc sdd; do
     n="${CNT[$slot]}"
-    (( n <= 2 )) || stop "More than two /mnt/$slot entries."
-    if (( n == 2 )); then
-      [[ "${ENT[$slot:0]}" == "${ENT[$slot:1]}" ]] || stop "Conflicting entries for /mnt/$slot; manual review needed."
+    # Found on a real unit (PROGRESS item 25): the whole block can be present three times. Any number of byte-identical
+    # lines collapses to one; a sanity cap sends an unusual pile-up (more than 10) to a human instead.
+    (( n <= 10 )) || stop "More than 10 /mnt/$slot entries; manual review needed."
+    if (( n >= 2 )); then
+      for (( k = 1; k < n; k++ )); do
+        [[ "${ENT[$slot:0]}" == "${ENT[$slot:$k]}" ]] || stop "Conflicting entries for /mnt/$slot; manual review needed."
+      done
       dups+=("$slot")
     fi
     echo "/mnt/$slot: $n fstab entries"
@@ -1120,7 +1124,8 @@ stage_fstab_dedup() {
       [[ "$source" == UUID=* || "$source" == "/dev/$slot" ]] || stop "$mp source $source not recognized."
       echo "$mp: not mounted -> identical duplicate lines collapsed; entry left as is: ${ENT[$slot:0]}"
     fi
-    out[${IDX[$slot:1]}]=$'\x01DROP'
+    for (( k = 1; k < CNT[$slot]; k++ )); do out[${IDX[$slot:$k]}]=$'\x01DROP'; done
+    echo "$mp: collapsed ${CNT[$slot]} to 1"
   done
   tmp="$(mktemp /etc/.fstab.wrn-XXXXXXXX)" || stop 'cannot stage candidate fstab.'
   trap "rm -f -- '$tmp'" EXIT

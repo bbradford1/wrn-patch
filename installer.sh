@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hanwha WRN installer 2.0.0-rc.6
+# Hanwha WRN installer 2.0.0-rc.7
 # NOTICE: This is an independent field-support tool, developed through hands-on testing on Hanwha WRN
 # recorders. It is NOT an official Hanwha product and is NOT supported by Hanwha. It is provided as-is,
 # based on real-world field experience. Use it at your own discretion and judgment.
@@ -13,7 +13,7 @@ set -Eeuo pipefail
 export LC_ALL=C
 umask 077
 # <<< ORIGINAL
-VERSION='2.0.0-rc.6'
+VERSION='2.0.0-rc.7'
 BASE_URL='https://raw.githubusercontent.com/bbradford1/wrn-patch/main'
 # >>> ORIGINAL installer.sh:11-29
 LOCAL_SOURCE=''
@@ -68,10 +68,10 @@ trap 'rm -rf -- "$STAGE"' EXIT
 # <<< ORIGINAL
 # SHA-256 pins are written by tools/build.py from the exact files in this commit.
 expected_sha(){ case "$1" in
-  wrn_maintenance.sh) printf "%s\n" "dce0a809a61742cb4b72e7bc26a7780083f22ca5552de52f54d4ac8f1eb0fa4b";;
-  wrn_diagnose.sh) printf "%s\n" "1668815d273347a944f29d99f3dd322c4b16c01af10ef386efb0dfbba127d090";;
-  wrn_recovery.sh) printf "%s\n" "e671dfde4006602631d303dd998f66f74f95b708835cca69a66df292775f599d";;
-  wrn_legacy_maintenance.sh) printf "%s\n" "f736cdc2079b48fe235b1bb630e18e4f6546ef40fbaad6a34b438069549d0ead";;
+  wrn_maintenance.sh) printf "%s\n" "c8dcd96a298dc8d0635ceb861088f14fd45ec847ab8e893b42805f9748e6c6be";;
+  wrn_diagnose.sh) printf "%s\n" "d4b0de0e5c0af29dc8fb0aa9628fbd182064a543c1ab60c6a2fe99056ae35866";;
+  wrn_recovery.sh) printf "%s\n" "c2ab57a3d8093ecd475ec2acab771679cac43ca383317fa0e585881afa3cf191";;
+  wrn_legacy_maintenance.sh) printf "%s\n" "6572fdd2cc50789fa29d60c6ddff7a888d54fb6b07450873bfd85b42cc740699";;
   *) return 1;;
 esac; }
 # >>> ORIGINAL installer.sh:70-99
