@@ -42,7 +42,7 @@ It **reports but never changes** WAVE analytics stored on the OS drive, and any 
 **What the tools do**
 
 * **Gen 2 recorders (Ubuntu 22.04):** `wrn_maintenance.sh` is the one tool a technician runs. It checks the recorder, explains what it found, and (with your OK) does the fixes listed above. `wrn_diagnose.sh` and `wrn_recovery.sh` are for support: a read-only report, and the repair tools that maintenance calls internally (journal replay and re-mount of offline archive drives, removal of OS-drive video).
-* **Gen 1 recorders (Ubuntu 18.04):** `wrn_legacy_maintenance.sh` caps the system journal at 500 MB and removes old, disabled Snap versions. It never stops WAVE, never touches the archive drive or `fstab`, and never reboots. `wrn_diagnose.sh` gives a read-only report.
+* **Gen 1 recorders (Ubuntu 18.04):** `wrn_legacy_maintenance.sh` caps the system journal at 500 MB and removes old, disabled Snap versions. It never stops WAVE, never touches the archive drive or `fstab`, and never reboots. Like Gen 2, it ends by asking whether you have verified the desktop, live video and playback; **Yes** removes its reports and scripts and keeps only `WRN-Service-History.txt` (with one line for the visit), **No** deletes nothing. `wrn_diagnose.sh` gives a read-only report.
 * **You don't choose.** The installer detects the Ubuntu version and downloads only the right tools for that recorder. The Gen 2 tools refuse to run on Gen 1, and the other way round.
 * **Where things go:** reports and the visit history are written to `~/Downloads/maintenance/` (`WRN-Maintenance_*.txt`, `WRN-Diagnostics_*.txt`, `WRN-Service-History.txt`). Only the history file survives sign-off.
 

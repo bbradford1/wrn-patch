@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# WRN Legacy Maintenance 2.0.0-rc.9 - the ONE command a technician runs on a Hanwha Gen 1 WRN (Ubuntu 18.04).
+# WRN Legacy Maintenance 2.0.0-rc.10 - the ONE command a technician runs on a Hanwha Gen 1 WRN (Ubuntu 18.04).
 # NOTICE: This is an independent field-support tool, developed through hands-on testing on Hanwha WRN
 # recorders. It is NOT an official Hanwha product and is NOT supported by Hanwha. It is provided as-is,
 # based on real-world field experience. Use it at your own discretion and judgment.
 #
-# TECHNICIANS TYPE NO OPTIONS. Run it with nothing after the name; it looks, explains, asks one yes/no, fixes, reports.
+# TECHNICIANS TYPE NO OPTIONS. Run it with nothing after the name; it looks, explains, asks one yes/no, fixes, reports,
+# and finally asks whether desktop, recording and playback were verified and the maintenance folder may be cleaned.
 #   sudo bash wrn_legacy_maintenance.sh     (if you forget sudo it asks for your password and carries on)
 # Engineering/support only (never shown to technicians):
 #   --check   look and report only; changes nothing
@@ -20,13 +21,14 @@
 set -u
 export LC_ALL=C
 umask 077
-VERSION='2.0.0-rc.9'
+VERSION='2.0.0-rc.10'
 WRN_SELF="$(readlink -f "$0" 2>/dev/null || echo "$0")"
 
 usage() {
   printf 'WRN Legacy Maintenance %s\n' "$VERSION"
   printf 'Usage: sudo bash wrn_legacy_maintenance.sh [--check | --apply | --version | --help]\n'
   printf '  (no option)  Check the recorder, explain what it found, ask once, then fix and report.\n'
+  printf '               A successful run ends by asking whether to clean the maintenance folder (Y keeps only WRN-Service-History.txt).\n'
   printf '  --check      Look and report only. Changes nothing.\n'
   printf '  --apply      Apply the fixes without asking.\n'
   printf 'Uses only on an authorized Gen 1 WRN (Ubuntu 18.04). A STOP is a safeguard: save the output and escalate.\n'
@@ -48,7 +50,7 @@ esac
 [[ -r /etc/os-release ]] || { echo 'STOP: cannot read OS information' >&2; exit 2; }
 # shellcheck disable=SC1091
 . /etc/os-release
-VERSION='2.0.0-rc.9'   # os-release also defines VERSION (the OS release text); keep this tool's own version
+VERSION='2.0.0-rc.10'   # os-release also defines VERSION (the OS release text); keep this tool's own version
 [[ "${ID:-}" == ubuntu && "${VERSION_ID:-}" == 18.04 ]] || { echo "$GEN2_STOP" >&2; exit 2; }
 if [[ $EUID -ne 0 ]]; then
   # A technician who forgot sudo should not have to retype anything.
@@ -236,6 +238,39 @@ tech_prompt() {
 }
 # <<< ORIGINAL
 
+# NEW IN 2.0.0-rc.10: the closing sign-off question Gen 2 asks, in its small form (no visit state, no re-entry questions).
+# After a successful guided run - or a guided run that found nothing to fix, because that is the re-run after the technician
+# checked - ask whether desktop, live recording and playback were verified. Y: append ONE line to WRN-Service-History.txt
+# (the only file that survives, as on Gen 2), then remove this toolkit's reports and scripts from the report folder. Only
+# regular files with the toolkit's own names are removed; a symlink is never followed. N: nothing is deleted.
+SIGNED_OFF=0
+signoff_cleanup() {  # signoff_cleanup "<what the history line says about the result>"
+  local result="$1" h="$OUTDIR/WRN-Service-History.txt" f n=0
+  [[ -r /dev/tty && -w /dev/tty ]] || return 0
+  printf '\n%s\n%s\n%s\n' '=== TECHNICIAN OPERATIONAL VERIFICATION ===' \
+    'Before cleaning up, personally verify: Ubuntu desktop, live WAVE recording, and playback.' \
+    'If cameras are unavailable, or any check fails, select N and keep the reports.' > /dev/tty
+  if ! tech_prompt 'Have you verified ALL three functions and want to clean the maintenance folder?'; then
+    echo "Nothing was deleted. The reports stay in $OUTDIR. Run this program again after you have verified desktop, recording and playback, and it will offer to clean up."
+    return 0
+  fi
+  if [[ -L "$h" || ( -e "$h" && ! -f "$h" ) ]]; then
+    echo "STOP: $h is not a regular file; nothing was deleted. Please contact support."; return 1
+  fi
+  printf '%s  WRN Legacy Maintenance %s (Gen 1)  %s; signed off by the technician (desktop, recording and playback verified)\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$VERSION" "$result" >> "$h" || { echo "STOP: could not write $h; nothing was deleted."; return 1; }
+  chmod 644 "$h" 2>/dev/null || true; chown "$OWNER" "$h" 2>/dev/null || true
+  shopt -s nullglob
+  for f in "$OUTDIR"/WRN-Legacy-Diagnostics_*.txt "$OUTDIR"/WRN-Diagnostics_*.txt "$OUTDIR"/wrn_*.sh "$OUTDIR"/installer.sh; do
+    [[ -e "$f" || -L "$f" ]] || continue   # a plain name (installer.sh) is not expanded by the glob: skip it when absent
+    if [[ -L "$f" || ! -f "$f" ]]; then echo "Skipped (not a regular file): $f"; continue; fi
+    rm -f -- "$f" && n=$((n+1)) || echo "Could not remove: $f"
+  done
+  shopt -u nullglob
+  SIGNED_OFF=1
+  echo "Cleaned the maintenance folder: removed $n file(s). The visit record is kept in $h."
+}
+
 # Report only - nothing is ever deleted here. journald manages only the journal folder of THIS machine-id; folders
 # left by other machine-ids (e.g. the factory image) are never trimmed by the log limit or the vacuum.
 other_journals_report() {
@@ -325,7 +360,10 @@ fi
 if [[ "$MODE" == guided ]]; then
   if (( ! NEED_JOURNAL && ! NEED_SNAP )); then
     write_notes
-    echo; echo 'RESULT: nothing needs fixing. Nothing was changed.'; exit 0
+    echo; echo 'RESULT: nothing needs fixing. Nothing was changed.'
+    signoff_cleanup 'nothing needed fixing' || exit 1
+    (( SIGNED_OFF )) || echo "Report: $REPORT"
+    exit 0
   fi
   printf '\n=== PLANNED CHANGES ===\n'
   (( NEED_JOURNAL )) && echo '  - Set the system log limit and trim old log history (only the log service is restarted, briefly).'
@@ -342,12 +380,19 @@ printf '\n=== RESULT ===\n'
 if (( RC == 0 )); then
   if grep -qE '^(SKIP|WARNING)' "$APPLY_LOG"; then
     echo 'RESULT: maintenance finished. Some Snap clean-up was skipped (see the SKIP/WARNING lines above); nothing was harmed.'
+    SOWORDS='maintenance finished, Snap clean-up skipped'
   else
     echo 'RESULT: maintenance completed successfully.'
+    SOWORDS='maintenance completed successfully'
   fi
   echo "OS drive before: $BEFORE"; echo "OS drive after:  $AFTER"
   echo 'Please check in the WAVE client that live view and recording look normal. This tool cannot check that.'
-  rm -f "$APPLY_LOG"; echo "Report: $REPORT"; exit 0
+  rm -f "$APPLY_LOG"
+  if [[ "$MODE" == guided ]]; then
+    signoff_cleanup "$SOWORDS" || exit 1
+  fi
+  (( SIGNED_OFF )) || echo "Report: $REPORT"
+  exit 0
 fi
 echo 'RESULT: maintenance did NOT complete. Nothing further was changed. Save this output and contact support.'
 rm -f "$APPLY_LOG"; echo "Report: $REPORT"; exit 1
