@@ -12,9 +12,9 @@ The tool downloads itself, checks its own files, and offers to start. From here 
 
 Sometimes it asks you to type a word shown in quotes on the screen, such as "recover" or "delete". That is a safety check before it does something it cannot undo. Capital or small letters both work. If you press **Enter** by mistake or mistype it, nothing changes: it says so and offers to try again (up to 3 tries in all), and you can press **Enter** to cancel.
 
-If an earlier visit finished but was never signed off, it asks whether to finish that one or start a new visit.
+On Gen 2 recorders, if an earlier visit finished but was never signed off, it asks whether to finish that one or start a new visit. Gen 1 recorders do not ask this.
 
-When it says it is finished, open the WAVE client and check the desktop, live video, a new recording and playback, then answer the last question. **Yes** tidies up: the tool's reports and scripts are deleted from `~/Downloads/maintenance`, and only `WRN-Service-History.txt` stays. **No** keeps everything, so you can run the tool again after you have checked. If you ever see **STOP**, nothing harmful has happened; the tool stopped on purpose. Leave the screen as it is and contact support.
+When it says it is finished, open the WAVE client and check the desktop, live video, a new recording and playback, then answer the last question. **Yes** tidies up: the tool's reports and scripts are deleted from `~/Downloads/maintenance`, and only `WRN-Service-History.txt` stays. **No** keeps everything, so you can run the tool again after you have checked. Gen 1 recorders ask this same last question, but only at the end of a normal run that fixed something or found nothing to fix. They do not ask it if you decline the fixes or if something went wrong. If you ever see **STOP**, nothing harmful has happened; the tool stopped on purpose. Leave the screen as it is and contact support.
 
 If you answered "no" to starting and want to run it later, the tool prints the exact line to type.
 
@@ -42,9 +42,9 @@ It **reports but never changes** WAVE analytics stored on the OS drive, and any 
 **What the tools do**
 
 * **Gen 2 recorders (Ubuntu 22.04):** `wrn_maintenance.sh` is the one tool a technician runs. It checks the recorder, explains what it found, and (with your OK) does the fixes listed above. `wrn_diagnose.sh` and `wrn_recovery.sh` are for support: a read-only report, and the repair tools that maintenance calls internally (journal replay and re-mount of offline archive drives, removal of OS-drive video).
-* **Gen 1 recorders (Ubuntu 18.04):** `wrn_legacy_maintenance.sh` caps the system journal at 500 MB and removes old, disabled Snap versions. It never stops WAVE, never touches the archive drive or `fstab`, and never reboots. Like Gen 2, it ends by asking whether you have verified the desktop, live video and playback; **Yes** removes its reports and scripts and keeps only `WRN-Service-History.txt` (with one line for the visit), **No** deletes nothing. `wrn_diagnose.sh` gives a read-only report.
+* **Gen 1 recorders (Ubuntu 18.04):** `wrn_legacy_maintenance.sh` caps the system journal at 500 MB and removes old, disabled Snap versions. It never stops WAVE, never touches the archive drive or `fstab`, and never reboots. Like Gen 2, a normal run ends by asking whether you have verified the desktop, live video and playback; **Yes** removes its reports and scripts and keeps only `WRN-Service-History.txt` (with one line for the visit), **No** deletes nothing, and you run the tool again after you have checked (it then reports that nothing needs fixing and asks again). It asks after a run that fixed something or found nothing to fix. It does not ask when you decline the fixes, when a run fails, when it is started in a special support mode, or without a terminal. Unlike Gen 2, it does not track unfinished visits. `wrn_diagnose.sh` gives a read-only report.
 * **You don't choose.** The installer detects the Ubuntu version and downloads only the right tools for that recorder. The Gen 2 tools refuse to run on Gen 1, and the other way round.
-* **Where things go:** reports and the visit history are written to `~/Downloads/maintenance/` (`WRN-Maintenance_*.txt`, `WRN-Diagnostics_*.txt`, `WRN-Service-History.txt`). Only the history file survives sign-off.
+* **Where things go:** reports and the visit history are written to `~/Downloads/maintenance/` (`WRN-Maintenance_*.txt` on Gen 2, `WRN-Legacy-Diagnostics_*.txt` on Gen 1, `WRN-Diagnostics_*.txt`, `WRN-Service-History.txt`). Only the history file survives sign-off.
 
 **Why this exists**
 
